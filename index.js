@@ -10,7 +10,7 @@ const CHATWOOT_ACCOUNT_ID = '122053';
 const CHATWOOT_INBOX_ID = '66314';
 const BASE_URL = 'https://app.chatwoot.com/api/v1/accounts';
 
-// Crear o buscar contacto
+// Crear o recuperar contacto
 async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
   const payload = {
     inbox_id: CHATWOOT_INBOX_ID,
@@ -50,7 +50,26 @@ async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
   }
 }
 
-// Crear conversación o reutilizar una existente
+// Vincular contacto al inbox
+async function linkContactToInbox(contactId, phone) {
+  try {
+    await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/contact_inboxes`, {
+      inbox_id: CHATWOOT_INBOX_ID,
+      source_id: `+${phone}`
+    }, {
+      headers: { api_access_token: CHATWOOT_API_TOKEN }
+    });
+    console.log('🔗 Contacto vinculado al inbox correctamente');
+  } catch (err) {
+    if (err.response?.data?.message?.includes('has already been taken')) {
+      console.log('ℹ️ Contacto ya estaba vinculado al inbox');
+      return;
+    }
+    console.error('❌ Error vinculando contacto al inbox:', err.response?.data || err.message);
+  }
+}
+
+// Crear o recuperar conversación
 async function createConversation(contactId) {
   try {
     const resp = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
@@ -77,7 +96,7 @@ async function createConversation(contactId) {
   }
 }
 
-// Enviar mensaje entrante a Chatwoot
+// Enviar mensaje entrante
 async function sendMessage(conversationId, message) {
   try {
     await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, {
@@ -92,7 +111,7 @@ async function sendMessage(conversationId, message) {
   }
 }
 
-// Webhook que recibe mensajes entrantes desde WhatsApp
+// Webhook desde WhatsApp
 app.post('/webhook', async (req, res) => {
   const data = req.body;
   try {
@@ -111,6 +130,8 @@ app.post('/webhook', async (req, res) => {
 
     const contact = await findOrCreateContact(phone, name);
     if (!contact) return res.sendStatus(500);
+
+    await linkContactToInbox(contact.id, phone); // ✅ clave
 
     const conversationId = await createConversation(contact.id);
     if (!conversationId) return res.sendStatus(500);
