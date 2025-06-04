@@ -5,7 +5,6 @@ const axios = require('axios');
 const app = express();
 app.use(bodyParser.json());
 
-// Chatwoot config
 const CHATWOOT_URL = "https://app.chatwoot.com";
 const ACCOUNT_ID = "122053";
 const INBOX_ID = 66314;
@@ -16,78 +15,68 @@ const HEADERS = {
   "api_access_token": API_TOKEN
 };
 
-// Función para obtener o crear contacto
 async function getOrCreateContact(wa_id, name) {
+  const phone = `+${wa_id}`;
   try {
-    const phone = `+${wa_id}`;
-
-    // Buscar contacto
-    const searchRes = await axios.get(`${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/contacts/search?q=${phone}`, { headers: HEADERS });
-    const existing = searchRes.data.payload[0];
-    if (existing) {
+    const search = await axios.get(`${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/contacts/search?q=${phone}`, { headers: HEADERS });
+    const found = search.data.payload[0];
+    if (found) {
       console.log("📇 Contacto existente:", phone);
-      return existing.id;
+      return found.id;
     }
 
-    // Crear contacto nuevo
-    const createRes = await axios.post(`${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/contacts`, {
+    const create = await axios.post(`${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/contacts`, {
       inbox_id: INBOX_ID,
       name,
       phone_number: phone
     }, { headers: HEADERS });
 
-    const contactId = createRes.data.payload.contact.id;
-    console.log("✅ Contacto creado:", contactId);
-    return contactId;
+    return create.data.payload.contact.id;
 
   } catch (error) {
-    console.error("❌ Error en contacto:", error.response?.data || error.message);
+    console.error("❌ Error creando contacto:", error.response?.data || error.message);
     throw error;
   }
 }
 
-// Función para crear conversación
 async function createConversation(contactId) {
   try {
-    const convRes = await axios.post(`${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations`, {
-      source_id: contactId,
+    const response = await axios.post(`${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/contacts/${contactId}/conversations`, {
       inbox_id: INBOX_ID
     }, { headers: HEADERS });
 
-    return convRes.data.id;
+    return response.data.id;
   } catch (error) {
     console.error("❌ Error creando conversación:", error.response?.data || error.message);
     throw error;
   }
 }
 
-// Enviar mensaje entrante
-async function sendMessage(conversationId, text) {
+async function sendMessage(conversationId, message) {
   try {
     await axios.post(`${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`, {
-      content: text,
+      content: message,
       message_type: "incoming"
     }, { headers: HEADERS });
-    console.log("💬 Mensaje enviado a conversación:", text);
+    console.log("✅ Mensaje enviado:", message);
   } catch (error) {
     console.error("❌ Error enviando mensaje:", error.response?.data || error.message);
   }
 }
 
-// Webhook de WhatsApp
-app.post("/webhook", async (req, res) => {
+app.post('/webhook', async (req, res) => {
   try {
     const entry = req.body.entry?.[0];
-    const change = entry?.changes?.[0]?.value;
+    const value = entry?.changes?.[0]?.value;
 
-    if (!change?.messages || !change.contacts) return res.sendStatus(200);
+    if (!value?.messages || !value?.contacts) return res.sendStatus(200);
 
-    const contact = change.contacts[0];
-    const message = change.messages[0];
+    const contact = value.contacts[0];
+    const msg = value.messages[0];
 
     const wa_id = contact.wa_id;
-    const name = contact.profile?.name || "Usuario WhatsApp";
-    const text = message?.text?.body || "Mensaje sin texto";
+    const name = contact.profile?.name || "WhatsApp User";
+    const text = msg.text?.body || "Mensaje sin texto";
 
     const contactId = await getOrCreateContact(wa_id, name);
     const conversationId = await createConversation(contactId);
@@ -101,7 +90,7 @@ app.post("/webhook", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-  res.send("✅ Webhook activo.");
+  res.send("✅ Webhook activo y funcionando.");
 });
 
 const PORT = process.env.PORT || 10000;
