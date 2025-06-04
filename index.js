@@ -68,13 +68,14 @@ async function linkContactToInbox(contactId, phone) {
   }
 }
 
-// Crear conversación usando endpoint correcto
+// ✅ Crear conversación compatible con app.chatwoot.com
 async function createConversation(contactId) {
   try {
-    const url = `${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/conversations`;
+    const url = `${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`;
     console.log(`📡 Intentando crear conversación en: ${url}`);
 
     const resp = await axios.post(url, {
+      source_id: contactId,
       inbox_id: CHATWOOT_INBOX_ID
     }, {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
