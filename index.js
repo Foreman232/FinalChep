@@ -68,14 +68,14 @@ async function linkContactToInbox(contactId, phone) {
   }
 }
 
-// ✅ Crear conversación compatible con app.chatwoot.com
-async function createConversation(contactId) {
+// ✅ Crear conversación usando el identifier (número con +)
+async function createConversation(sourceId) {
   try {
     const url = `${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`;
     console.log(`📡 Intentando crear conversación en: ${url}`);
 
     const resp = await axios.post(url, {
-      source_id: contactId,
+      source_id: sourceId,
       inbox_id: CHATWOOT_INBOX_ID
     }, {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
@@ -85,21 +85,12 @@ async function createConversation(contactId) {
     return resp.data.id;
   } catch (err) {
     const msg = err.response?.data?.message || err.message;
-    if (msg.includes('has already been taken')) {
-      const getResp = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/conversations`, {
-        headers: { api_access_token: CHATWOOT_API_TOKEN }
-      });
-      const convId = getResp.data.payload[0]?.id;
-      console.log('ℹ️ Conversación existente:', convId);
-      return convId;
-    }
-
-    console.error('❌ Error creando conversación:', err.response?.data || err.message);
+    console.error('❌ Error creando conversación:', msg);
     return null;
   }
 }
 
-// Enviar mensaje entrante
+// Enviar mensaje
 async function sendMessage(conversationId, message) {
   try {
     await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, {
@@ -114,13 +105,13 @@ async function sendMessage(conversationId, message) {
   }
 }
 
-// Webhook que recibe mensajes de WhatsApp (360dialog)
+// Webhook para recibir mensajes de WhatsApp (360dialog)
 app.post('/webhook', async (req, res) => {
   const data = req.body;
   try {
     const entry = data.entry?.[0];
     const changes = entry?.changes?.[0]?.value;
-    const phone = changes?.contacts?.[0]?.wa_id;
+    const phone = changes?.contacts?.[0]?.wa_id; // ya viene como 502xxxx o 521xxx
     const name = changes?.contacts?.[0]?.profile?.name;
     const message = changes?.messages?.[0]?.text?.body;
 
@@ -136,7 +127,7 @@ app.post('/webhook', async (req, res) => {
 
     await linkContactToInbox(contact.id, phone);
 
-    const conversationId = await createConversation(contact.id);
+    const conversationId = await createConversation(contact.identifier); // 🔑 ahora usamos el número con +
     if (!conversationId) return res.sendStatus(500);
 
     await sendMessage(conversationId, message);
