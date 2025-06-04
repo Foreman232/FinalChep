@@ -7,7 +7,7 @@ app.use(bodyParser.json());
 
 const PORT = process.env.PORT || 3000;
 
-// CONFIGURACIÓN CHATWOOT
+// Configuración de Chatwoot
 const CHATWOOT_API_URL = 'https://app.chatwoot.com';
 const CHATWOOT_API_TOKEN = '8JE48bwAMsyvEihSvjHy6Ag6';
 const CHATWOOT_ACCOUNT_ID = '122053';
@@ -21,52 +21,53 @@ app.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
 
-    // Validación básica
-    if (!body || !body.entry || !body.entry[0].changes[0].value.messages) {
-      return res.sendStatus(200); // ignorar si no es mensaje válido
+    if (!body?.entry?.[0]?.changes?.[0]?.value?.messages) {
+      return res.sendStatus(200);
     }
 
-    const messageData = body.entry[0].changes[0].value;
-    const msg = messageData.messages[0];
-    const contact = messageData.contacts[0];
+    const value = body.entry[0].changes[0].value;
+    const message = value.messages[0];
+    const contact = value.contacts[0];
 
-    const phone = `+${contact.wa_id}`;
-    const name = contact.profile?.name || 'Sin nombre';
-    const text = msg.text?.body || 'Mensaje vacío';
     const identifier = contact.wa_id;
+    const phone = `+${identifier}`;
+    const name = contact.profile?.name || 'Sin nombre';
+    const text = message.text?.body || 'Mensaje vacío';
 
-    // Paso 1: buscar contacto
+    // Paso 1: Buscar o crear contacto
+    const searchResp = await axios.get(
+      `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/contacts/search?q=${identifier}`,
+      {
+        headers: { api_access_token: CHATWOOT_API_TOKEN }
+      }
+    );
+
     let contactId, inboxId;
-
-    const searchUrl = `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/contacts/search?q=${identifier}`;
-    const searchResp = await axios.get(searchUrl, {
-      headers: { api_access_token: CHATWOOT_API_TOKEN }
-    });
-
     const found = searchResp.data.payload?.[0];
+
     if (found) {
       contactId = found.id;
       inboxId = found.contact_inboxes?.[0]?.inbox_id;
     } else {
-      // Paso 2: crear contacto
-      const createResp = await axios.post(
+      const contactResp = await axios.post(
         `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/contacts`,
         {
           inbox_identifier: CHATWOOT_INBOX_IDENTIFIER,
-          name: name,
-          identifier: identifier,
+          name,
+          identifier,
           phone_number: phone
         },
         {
           headers: { api_access_token: CHATWOOT_API_TOKEN }
         }
       );
-      contactId = createResp.data.payload.contact.id;
-      inboxId = createResp.data.payload.contact_inbox.inbox_id;
+
+      contactId = contactResp.data.payload.contact.id;
+      inboxId = contactResp.data.payload.contact_inbox.inbox_id;
     }
 
-    // Paso 3: enviar mensaje entrante a Chatwoot
-    await axios.post(
+    // Paso 2: Buscar o crear conversación
+    const convoResp = await axios.post(
       `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations`,
       {
         source_id: identifier,
@@ -78,8 +79,11 @@ app.post('/webhook', async (req, res) => {
       }
     );
 
+    const conversationId = convoResp.data.id;
+
+    // Paso 3: Enviar mensaje entrante a la conversación
     await axios.post(
-      `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${contactId}/messages`,
+      `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`,
       {
         content: text,
         message_type: 'incoming',
@@ -92,7 +96,6 @@ app.post('/webhook', async (req, res) => {
 
     console.log('📩 Mensaje reenviado a Chatwoot:', text);
     res.sendStatus(200);
-
   } catch (error) {
     console.error('❌ Error procesando mensaje:', error.response?.data || error.message);
     res.sendStatus(500);
