@@ -5,106 +5,102 @@ const axios = require('axios');
 const app = express();
 app.use(bodyParser.json());
 
-const CHATWOOT_URL = 'https://app.chatwoot.com';
-const API_TOKEN = '8JE48bwAMsyvEihSvjHy6Ag6';
-const ACCOUNT_ID = '122053';
-const INBOX_ID = '65391';
+// Configuración Chatwoot
+const CHATWOOT_API_URL = "https://app.chatwoot.com";
+const ACCOUNT_ID = "122053";
+const INBOX_ID = "66314";
+const API_TOKEN = "8JE48bwAMsyvEihSvjHy6Ag6";
 
+const HEADERS = {
+  "Content-Type": "application/json",
+  "api_access_token": API_TOKEN
+};
+
+// Función para obtener o crear contacto
+async function getOrCreateContact(phone, name) {
+  try {
+    // Buscar si ya existe el contacto
+    const search = await axios.get(`${CHATWOOT_API_URL}/api/v1/accounts/${ACCOUNT_ID}/contacts/search?q=${phone}`, { headers: HEADERS });
+    if (search.data.payload.length > 0) {
+      console.log("📌 Contacto existente:", phone);
+      return search.data.payload[0].id;
+    }
+
+    // Crear contacto nuevo
+    const create = await axios.post(`${CHATWOOT_API_URL}/api/v1/accounts/${ACCOUNT_ID}/contacts`, {
+      inbox_id: INBOX_ID,
+      name,
+      phone_number: `+${phone}`
+    }, { headers: HEADERS });
+
+    console.log("✅ Contacto creado:", phone);
+    return create.data.payload.contact.id;
+  } catch (error) {
+    console.error("❌ Error en contacto:", error.response?.data || error.message);
+    throw error;
+  }
+}
+
+// Función para crear conversación
+async function createConversation(contactId) {
+  try {
+    const conv = await axios.post(`${CHATWOOT_API_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations`, {
+      source_id: contactId.toString(),
+      inbox_id: INBOX_ID
+    }, { headers: HEADERS });
+
+    return conv.data.id;
+  } catch (error) {
+    console.error("❌ Error creando conversación:", error.response?.data || error.message);
+    throw error;
+  }
+}
+
+// Función para enviar mensaje entrante
+async function sendMessage(conversationId, text) {
+  try {
+    await axios.post(`${CHATWOOT_API_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`, {
+      content: text,
+      message_type: "incoming"
+    }, { headers: HEADERS });
+    console.log("💬 Mensaje enviado a Chatwoot:", text);
+  } catch (error) {
+    console.error("❌ Error enviando mensaje:", error.response?.data || error.message);
+  }
+}
+
+// Webhook principal
 app.post('/webhook', async (req, res) => {
   try {
-    const value = req.body.entry?.[0]?.changes?.[0]?.value;
-    const contact = value?.contacts?.[0];
-    const message = value?.messages?.[0];
+    const entry = req.body.entry?.[0];
+    const change = entry?.changes?.[0]?.value;
 
-    if (!contact || !message) return res.sendStatus(400);
+    if (!change || !change.contacts || !change.messages) return res.sendStatus(200);
 
-    const waId = contact.wa_id;
-    const phone = `+${waId}`;
-    const name = contact.profile?.name || 'Cliente WhatsApp';
-    const text = message.text?.body || '[Sin texto]';
+    const wa_id = change.contacts[0].wa_id;
+    const name = change.contacts[0].profile.name;
+    const message = change.messages[0];
+    const text = message?.text?.body;
 
-    // 1. Buscar contacto
-    const contactResp = await axios.get(
-      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/contacts/search?q=${waId}`,
-      { headers: { api_access_token: API_TOKEN } }
-    );
+    if (!text) return res.sendStatus(200);
 
-    let contactId;
-    if (contactResp.data.payload.length > 0) {
-      contactId = contactResp.data.payload[0].id;
-      console.log('🔁 Contacto ya existe:', contactId);
-    } else {
-      const createResp = await axios.post(
-        `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/contacts`,
-        {
-          inbox_id: INBOX_ID,
-          name,
-          phone_number: phone,
-          identifier: waId
-        },
-        { headers: { api_access_token: API_TOKEN } }
-      );
-      contactId = createResp.data.payload.contact.id;
-      console.log('🆕 Contacto creado:', contactId);
-    }
+    const contactId = await getOrCreateContact(wa_id, name);
+    const conversationId = await createConversation(contactId);
+    await sendMessage(conversationId, text);
 
-    // 2. Buscar conversación existente
-    let conversationId;
-    try {
-      const convoSearch = await axios.get(
-        `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations`,
-        {
-          headers: { api_access_token: API_TOKEN },
-          params: { inbox_id: INBOX_ID, contact_id: contactId }
-        }
-      );
-      if (convoSearch.data.payload.length > 0) {
-        conversationId = convoSearch.data.payload[0].id;
-        console.log('🔁 Conversación ya existe:', conversationId);
-      }
-    } catch (err) {
-      console.warn('⚠️ No se encontró conversación previa');
-    }
-
-    // 3. Crear conversación si no existe
-    if (!conversationId) {
-      const convoCreate = await axios.post(
-        `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations`,
-        {
-          source_id: waId,
-          inbox_id: INBOX_ID,
-          contact_id: contactId
-        },
-        { headers: { api_access_token: API_TOKEN } }
-      );
-      conversationId = convoCreate.data.id;
-      console.log('🆕 Conversación creada:', conversationId);
-    }
-
-    // 4. Enviar mensaje entrante
-    await axios.post(
-      `${CHATWOOT_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
-      {
-        content: text,
-        message_type: 'incoming',
-        private: false
-      },
-      { headers: { api_access_token: API_TOKEN } }
-    );
-
-    console.log('✅ Mensaje enviado a Chatwoot');
     res.sendStatus(200);
-  } catch (err) {
-    console.error('❌ Error final:', err.response?.data || err.message);
+  } catch (error) {
+    console.error("❌ Error procesando mensaje:", error.message);
     res.sendStatus(500);
   }
 });
 
+// Endpoint de prueba
 app.get('/', (req, res) => {
-  res.send('✅ Webhook activo');
+  res.send("✅ Webhook activo y listo.");
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Webhook corriendo en puerto ${PORT}`);
 });
