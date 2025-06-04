@@ -10,7 +10,7 @@ const CHATWOOT_ACCOUNT_ID = '122053';
 const CHATWOOT_INBOX_ID = '66314';
 const BASE_URL = 'https://app.chatwoot.com/api/v1/accounts';
 
-// Crear contacto o recuperar si ya existe
+// Crear o buscar contacto
 async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
   const payload = {
     inbox_id: CHATWOOT_INBOX_ID,
@@ -23,25 +23,26 @@ async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
     const response = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts`, payload, {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
-    console.log('✅ Contacto creado:', response.data.payload.identifier);
+    console.log('✅ Contacto creado:', response.data.payload.id);
     return response.data.payload;
   } catch (err) {
     const msg = err.response?.data?.message || JSON.stringify(err.response?.data);
     if (msg.includes('has already been taken')) {
-      console.log('ℹ️ Contacto ya existe:', phone);
+      console.log('ℹ️ Contacto ya existe, buscando...');
 
-      // Buscar contacto existente y devolver el objeto completo
       const getResp = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/search?q=${phone}`, {
         headers: { api_access_token: CHATWOOT_API_TOKEN }
       });
 
-      const contact = getResp.data.payload[0];
-      if (!contact || !contact.id) {
-        console.error('❌ No se pudo recuperar el ID del contacto existente.');
+      console.log('🔎 Resultado de búsqueda:', getResp.data.payload);
+
+      if (!getResp.data.payload || getResp.data.payload.length === 0) {
+        console.error('❌ No se encontró el contacto existente');
         return null;
       }
 
-      return contact;
+      console.log('✅ Contacto recuperado:', getResp.data.payload[0].id);
+      return getResp.data.payload[0];
     }
 
     console.error('❌ Error creando contacto:', msg);
@@ -49,7 +50,7 @@ async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
   }
 }
 
-// Crear conversación para un contacto
+// Crear conversación o reutilizar una existente
 async function createConversation(contactId) {
   try {
     const resp = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
@@ -58,15 +59,17 @@ async function createConversation(contactId) {
     }, {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
+    console.log('✅ Conversación creada:', resp.data.id);
     return resp.data.id;
   } catch (err) {
     const msg = err.response?.data?.message || err.message;
     if (msg.includes('has already been taken')) {
-      // Buscar conversación existente
       const getResp = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/conversations`, {
         headers: { api_access_token: CHATWOOT_API_TOKEN }
       });
-      return getResp.data.payload[0]?.id;
+      const convId = getResp.data.payload[0]?.id;
+      console.log('ℹ️ Conversación existente:', convId);
+      return convId;
     }
 
     console.error('❌ Error creando conversación:', err.response?.data || err.message);
@@ -89,7 +92,7 @@ async function sendMessage(conversationId, message) {
   }
 }
 
-// Webhook de entrada (desde 360dialog)
+// Webhook que recibe mensajes entrantes desde WhatsApp
 app.post('/webhook', async (req, res) => {
   const data = req.body;
   try {
