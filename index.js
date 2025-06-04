@@ -5,49 +5,58 @@ const axios = require('axios');
 const app = express();
 app.use(bodyParser.json());
 
-const CHATWOOT_API_TOKEN = '8JE48bwAMsyvEihSvjHy6Ag6';
-const ACCOUNT_ID = 122053;
-const INBOX_IDENTIFIER = 'FmIi9sWlyf5uafK6dmzoj84Qh'; // Este es el identificador de tu inbox "CHEP Tarimas Azules"
+const CHATWOOT_URL = 'https://app.chatwoot.com'; // No lo cambies
+const CHATWOOT_ACCOUNT_ID = 122053;
+const CHATWOOT_INBOX_ID = 65391;
+const CHATWOOT_API_KEY = '8JE48bwAMsyvEihSvjHy6Ag6'; // Tu token real
 
 app.post('/webhook', async (req, res) => {
-  console.log('📩 Mensaje recibido:', JSON.stringify(req.body, null, 2));
+  console.log('📩 Mensaje recibido de 360dialog:', JSON.stringify(req.body, null, 2));
+
+  const entry = req.body?.entry?.[0];
+  const changes = entry?.changes?.[0];
+  const value = changes?.value;
+  const contacts = value?.contacts?.[0];
+  const messages = value?.messages?.[0];
+
+  if (!messages || !contacts) {
+    return res.sendStatus(200); // No es un mensaje válido
+  }
+
+  const from = messages.from; // número del cliente
+  const name = contacts.profile?.name || 'Cliente';
+  const text = messages.text?.body || '(Mensaje no soportado)';
 
   try {
-    const message = req.body?.messages?.[0];
-    const contact = req.body?.contacts?.[0];
+    // Crear contacto
+    await axios.post(`${CHATWOOT_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/contacts`, {
+      inbox_id: CHATWOOT_INBOX_ID,
+      name,
+      identifier: from
+    }, {
+      headers: { api_access_token: CHATWOOT_API_KEY }
+    });
 
-    if (message && contact) {
-      const name = contact.profile.name;
-      const phone = contact.wa_id;
-      const content = message.text?.body || '[Mensaje no textual]';
+    // Enviar mensaje entrante
+    await axios.post(`${CHATWOOT_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/messages`, {
+      content: text,
+      inbox_id: CHATWOOT_INBOX_ID,
+      contact_identifier: from,
+      message_type: 'incoming'
+    }, {
+      headers: { api_access_token: CHATWOOT_API_KEY }
+    });
 
-      // Enviar a Chatwoot
-      await axios.post(`https://app.chatwoot.com/public/api/v1/inboxes/${INBOX_IDENTIFIER}/contacts/whatsapp/notify`, {
-        contact: {
-          name: name,
-          phone_number: phone
-        },
-        message: {
-          content: content
-        }
-      }, {
-        headers: {
-          api_access_token: CHATWOOT_API_TOKEN
-        }
-      });
-
-      console.log(`✅ Enviado a Chatwoot: ${phone}`);
-    }
-
-  } catch (error) {
-    console.error('❌ Error al enviar a Chatwoot:', error.message);
+    console.log('✅ Mensaje enviado a Chatwoot');
+  } catch (err) {
+    console.error('❌ Error enviando a Chatwoot:', err.response?.data || err.message);
   }
 
   res.sendStatus(200);
 });
 
 app.get('/', (req, res) => {
-  res.send('✅ Webhook activo desde Render');
+  res.send('✅ Webhook activo y corriendo');
 });
 
 const PORT = process.env.PORT || 3000;
