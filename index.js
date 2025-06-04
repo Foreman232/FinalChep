@@ -5,7 +5,6 @@ const axios = require('axios');
 const app = express();
 app.use(bodyParser.json());
 
-// Datos configurables
 const CHATWOOT_API_TOKEN = '8JE48bwAMsyvEihSvjHy6Ag6';
 const CHATWOOT_ACCOUNT_ID = '122053';
 const CHATWOOT_INBOX_ID = '66314';
@@ -69,11 +68,10 @@ async function linkContactToInbox(contactId, phone) {
   }
 }
 
-// Crear o recuperar conversación
+// ✅ Crear conversación con contacto directamente
 async function createConversation(contactId) {
   try {
-    const resp = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
-      source_id: contactId,
+    const resp = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/conversations`, {
       inbox_id: CHATWOOT_INBOX_ID
     }, {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
@@ -81,7 +79,8 @@ async function createConversation(contactId) {
     console.log('✅ Conversación creada:', resp.data.id);
     return resp.data.id;
   } catch (err) {
-    if (err.response?.data?.message?.includes('has already been taken')) {
+    const msg = err.response?.data?.message || err.message;
+    if (msg.includes('has already been taken')) {
       const getResp = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/conversations`, {
         headers: { api_access_token: CHATWOOT_API_TOKEN }
       });
@@ -95,7 +94,7 @@ async function createConversation(contactId) {
   }
 }
 
-// Enviar mensaje
+// Enviar mensaje entrante
 async function sendMessage(conversationId, message) {
   try {
     await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, {
@@ -110,7 +109,7 @@ async function sendMessage(conversationId, message) {
   }
 }
 
-// Webhook desde WhatsApp
+// Webhook que recibe mensajes desde WhatsApp (360dialog)
 app.post('/webhook', async (req, res) => {
   const data = req.body;
   try {
