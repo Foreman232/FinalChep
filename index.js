@@ -26,9 +26,8 @@ app.post('/webhook', async (req, res) => {
     const name = contact.profile?.name || 'Cliente WhatsApp';
     const text = message.text?.body || '[Sin contenido]';
 
-    // 1. Buscar contacto existente
-    const contactLookupUrl = `${CHATWOOT_API_URL}/api/v1/accounts/${ACCOUNT_ID}/contacts/search?q=${waId}`;
-    const lookupResp = await axios.get(contactLookupUrl, {
+    // Paso 1: Buscar contacto
+    const lookupResp = await axios.get(`${CHATWOOT_API_URL}/api/v1/accounts/${ACCOUNT_ID}/contacts/search?q=${waId}`, {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
 
@@ -38,24 +37,21 @@ app.post('/webhook', async (req, res) => {
       contactId = lookupResp.data.payload[0].id;
       console.log(`🔁 Contacto existente ID: ${contactId}`);
     } else {
-      // 2. Crear contacto si no existe
       const createResp = await axios.post(
         `${CHATWOOT_API_URL}/api/v1/accounts/${ACCOUNT_ID}/contacts`,
         {
           inbox_id: INBOX_ID,
           name,
           phone_number: phone,
-          identifier: waId,
+          identifier: waId
         },
-        {
-          headers: { api_access_token: CHATWOOT_API_TOKEN }
-        }
+        { headers: { api_access_token: CHATWOOT_API_TOKEN } }
       );
       contactId = createResp.data.payload.contact.id;
       console.log(`🆕 Contacto creado ID: ${contactId}`);
     }
 
-    // 3. Crear conversación (usando source_id para evitar duplicados)
+    // Paso 2 y 3: Crear conversación con source_id (wa_id)
     const convoResp = await axios.post(
       `${CHATWOOT_API_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations`,
       {
@@ -63,14 +59,12 @@ app.post('/webhook', async (req, res) => {
         inbox_id: INBOX_ID,
         contact_id: contactId
       },
-      {
-        headers: { api_access_token: CHATWOOT_API_TOKEN }
-      }
+      { headers: { api_access_token: CHATWOOT_API_TOKEN } }
     );
 
     const conversationId = convoResp.data.id;
 
-    // 4. Enviar mensaje entrante
+    // Paso 4: Enviar mensaje como entrante
     await axios.post(
       `${CHATWOOT_API_URL}/api/v1/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
       {
@@ -78,12 +72,10 @@ app.post('/webhook', async (req, res) => {
         message_type: 'incoming',
         private: false
       },
-      {
-        headers: { api_access_token: CHATWOOT_API_TOKEN }
-      }
+      { headers: { api_access_token: CHATWOOT_API_TOKEN } }
     );
 
-    console.log('✅ Mensaje recibido y reenviado a Chatwoot.');
+    console.log('✅ Mensaje reenviado a Chatwoot.');
     res.sendStatus(200);
   } catch (err) {
     console.error('❌ Error procesando mensaje:', err.response?.data || err.message);
@@ -92,7 +84,7 @@ app.post('/webhook', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.send('✅ Webhook activo en Render');
+  res.send('✅ Webhook activo desde Render');
 });
 
 const PORT = process.env.PORT || 3000;
