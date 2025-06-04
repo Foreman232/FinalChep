@@ -8,9 +8,9 @@ app.use(bodyParser.json());
 const CHATWOOT_API_TOKEN = '8JE48bwAMsyvEihSvjHy6Ag6';
 const CHATWOOT_ACCOUNT_ID = '122053';
 const CHATWOOT_INBOX_ID = '66314';
-
 const BASE_URL = 'https://app.chatwoot.com/api/v1/accounts';
 
+// Crear contacto (o buscar si ya existe)
 async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
   const payload = {
     inbox_id: CHATWOOT_INBOX_ID,
@@ -42,6 +42,7 @@ async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
   }
 }
 
+// Crear conversación (o reutilizar una existente)
 async function createConversation(contactId) {
   try {
     const resp = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
@@ -52,12 +53,13 @@ async function createConversation(contactId) {
     });
     return resp.data.id;
   } catch (err) {
-    if (err.response?.data?.message?.includes('has already been taken')) {
-      // Ya existe conversación, obtenerla
-      const resp = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/conversations`, {
+    const msg = err.response?.data?.message || err.message;
+    if (msg.includes('has already been taken')) {
+      // Buscar conversación existente
+      const getResp = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/conversations`, {
         headers: { api_access_token: CHATWOOT_API_TOKEN }
       });
-      return resp.data.payload[0]?.id;
+      return getResp.data.payload[0]?.id;
     }
 
     console.error('❌ Error creando conversación:', err.response?.data || err.message);
@@ -65,6 +67,7 @@ async function createConversation(contactId) {
   }
 }
 
+// Enviar mensaje entrante
 async function sendMessage(conversationId, message) {
   try {
     await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, {
@@ -79,6 +82,7 @@ async function sendMessage(conversationId, message) {
   }
 }
 
+// Endpoint del Webhook de WhatsApp
 app.post('/webhook', async (req, res) => {
   const data = req.body;
   try {
