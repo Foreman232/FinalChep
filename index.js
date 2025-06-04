@@ -68,14 +68,18 @@ async function linkContactToInbox(contactId, phone) {
   }
 }
 
-// ✅ Crear conversación con contacto directamente
+// Crear conversación usando endpoint correcto
 async function createConversation(contactId) {
   try {
-    const resp = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/conversations`, {
+    const url = `${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/conversations`;
+    console.log(`📡 Intentando crear conversación en: ${url}`);
+
+    const resp = await axios.post(url, {
       inbox_id: CHATWOOT_INBOX_ID
     }, {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
+
     console.log('✅ Conversación creada:', resp.data.id);
     return resp.data.id;
   } catch (err) {
@@ -109,7 +113,7 @@ async function sendMessage(conversationId, message) {
   }
 }
 
-// Webhook que recibe mensajes desde WhatsApp (360dialog)
+// Webhook que recibe mensajes de WhatsApp (360dialog)
 app.post('/webhook', async (req, res) => {
   const data = req.body;
   try {
