@@ -10,6 +10,22 @@ const ACCOUNT_ID = '122053';
 const CHATWOOT_TOKEN = '8JE48bwAMsyvEihSvjHy6Ag6';
 const INBOX_IDENTIFIER = 'XFTBmRpV8Tkeok139YAhaZoo';
 
+async function getContactIdByPhone(phone) {
+  try {
+    const response = await axios.get(`${CHATWOOT_API_URL}/accounts/${ACCOUNT_ID}/contacts/search?q=${phone}`, {
+      headers: { api_access_token: CHATWOOT_TOKEN }
+    });
+    const results = response.data.payload;
+    if (results && results.length > 0) {
+      return results[0].id;
+    }
+    return null;
+  } catch (err) {
+    console.error("🔍 Error buscando contacto:", err.message);
+    return null;
+  }
+}
+
 app.post('/webhook', async (req, res) => {
   try {
     const payload = req.body.entry?.[0]?.changes?.[0]?.value;
@@ -24,39 +40,41 @@ app.post('/webhook', async (req, res) => {
 
     console.log("📨 Mensaje recibido:", text);
 
-    // Paso 1: Crear contacto (o encontrarlo si ya existe)
-    const contactResponse = await axios.post(
-      `${CHATWOOT_API_URL}/accounts/${ACCOUNT_ID}/contacts`,
-      {
-        inbox_id: INBOX_IDENTIFIER,
-        name: name,
-        phone_number: `+${phone}`, // ✅ Formato E.164
-      },
-      {
-        headers: {
-          api_access_token: CHATWOOT_TOKEN,
+    // Paso 1: Buscar contacto existente
+    let contactId = await getContactIdByPhone(`+${phone}`);
+
+    // Paso 2: Crear si no existe
+    if (!contactId) {
+      const contactResponse = await axios.post(
+        `${CHATWOOT_API_URL}/accounts/${ACCOUNT_ID}/contacts`,
+        {
+          inbox_id: INBOX_IDENTIFIER,
+          name: name,
+          phone_number: `+${phone}`,
         },
-      }
-    );
+        {
+          headers: { api_access_token: CHATWOOT_TOKEN },
+        }
+      );
+      contactId = contactResponse.data.payload.contact.id;
+      console.log("🆕 Contacto creado:", contactId);
+    } else {
+      console.log("👤 Contacto ya existe:", contactId);
+    }
 
-    const contactId = contactResponse.data.payload.contact.id;
-    console.log("✅ Contacto ID:", contactId);
-
-    // Paso 2: Crear conversación
+    // Paso 3: Crear conversación
     const conversationResponse = await axios.post(
       `${CHATWOOT_API_URL}/accounts/${ACCOUNT_ID}/contacts/${contactId}/conversations`,
       {},
       {
-        headers: {
-          api_access_token: CHATWOOT_TOKEN,
-        },
+        headers: { api_access_token: CHATWOOT_TOKEN },
       }
     );
 
     const conversationId = conversationResponse.data.id;
-    console.log("✅ Conversación ID:", conversationId);
+    console.log("💬 Conversación creada:", conversationId);
 
-    // Paso 3: Enviar mensaje
+    // Paso 4: Enviar mensaje
     await axios.post(
       `${CHATWOOT_API_URL}/accounts/${ACCOUNT_ID}/conversations/${conversationId}/messages`,
       {
@@ -64,18 +82,14 @@ app.post('/webhook', async (req, res) => {
         message_type: 'incoming',
       },
       {
-        headers: {
-          api_access_token: CHATWOOT_TOKEN,
-        },
+        headers: { api_access_token: CHATWOOT_TOKEN },
       }
     );
 
     console.log('✅ Mensaje enviado a Chatwoot');
     res.sendStatus(200);
-
   } catch (error) {
-    const errMsg = error.response?.data || error.message;
-    console.error('❌ Error procesando mensaje:', errMsg);
+    console.error('❌ Error procesando mensaje:', error.response?.data || error.message);
     res.sendStatus(500);
   }
 });
