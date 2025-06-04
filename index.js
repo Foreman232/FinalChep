@@ -10,7 +10,7 @@ const CHATWOOT_ACCOUNT_ID = '122053';
 const CHATWOOT_INBOX_ID = '66314';
 const BASE_URL = 'https://app.chatwoot.com/api/v1/accounts';
 
-// Crear contacto (o buscar si ya existe)
+// Crear contacto o recuperar si ya existe
 async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
   const payload = {
     inbox_id: CHATWOOT_INBOX_ID,
@@ -30,11 +30,18 @@ async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
     if (msg.includes('has already been taken')) {
       console.log('ℹ️ Contacto ya existe:', phone);
 
-      // Buscar el contacto existente
+      // Buscar contacto existente y devolver el objeto completo
       const getResp = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/search?q=${phone}`, {
         headers: { api_access_token: CHATWOOT_API_TOKEN }
       });
-      return getResp.data.payload[0];
+
+      const contact = getResp.data.payload[0];
+      if (!contact || !contact.id) {
+        console.error('❌ No se pudo recuperar el ID del contacto existente.');
+        return null;
+      }
+
+      return contact;
     }
 
     console.error('❌ Error creando contacto:', msg);
@@ -42,7 +49,7 @@ async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
   }
 }
 
-// Crear conversación (o reutilizar una existente)
+// Crear conversación para un contacto
 async function createConversation(contactId) {
   try {
     const resp = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
@@ -67,7 +74,7 @@ async function createConversation(contactId) {
   }
 }
 
-// Enviar mensaje entrante
+// Enviar mensaje entrante a Chatwoot
 async function sendMessage(conversationId, message) {
   try {
     await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, {
@@ -82,7 +89,7 @@ async function sendMessage(conversationId, message) {
   }
 }
 
-// Endpoint del Webhook de WhatsApp
+// Webhook de entrada (desde 360dialog)
 app.post('/webhook', async (req, res) => {
   const data = req.body;
   try {
