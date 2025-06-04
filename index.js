@@ -5,77 +5,83 @@ const axios = require('axios');
 const app = express();
 app.use(bodyParser.json());
 
-const CHATWOOT_API_URL = 'https://app.chatwoot.com';
-const CHATWOOT_ACCOUNT_ID = '122053';
-const CHATWOOT_INBOX_IDENTIFIER = 'XFTBmRpV8Tkeokj39Y4haZoo';
+const CHATWOOT_API_URL = 'https://app.chatwoot.com'; // No le pongas slash final
 const CHATWOOT_API_TOKEN = '8JE48bwAMsyvEihSvjHy6Ag6';
+const CHATWOOT_ACCOUNT_ID = '122053';
+const CHATWOOT_INBOX_IDENTIFIER = 'XFTBmRp8TKeokj39Y4haZoo';
 
 app.post('/webhook', async (req, res) => {
   try {
-    console.log('📩 Mensaje recibido:', JSON.stringify(req.body, null, 2));
+    const payload = req.body;
+    const messageData = payload?.entry?.[0]?.changes?.[0]?.value;
 
-    const entry = req.body.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const message = changes?.value?.messages?.[0];
-    const contact = changes?.value?.contacts?.[0];
+    const phone_number_id = messageData?.metadata?.phone_number_id;
+    const from = messageData?.messages?.[0]?.from;
+    const msg_body = messageData?.messages?.[0]?.text?.body;
+    const name = messageData?.contacts?.[0]?.profile?.name || 'Cliente WhatsApp';
 
-    if (!message || !contact) {
-      return res.sendStatus(200); // No hay mensaje útil
+    if (!from || !msg_body) {
+      console.log('❌ No se pudo procesar el mensaje.');
+      return res.sendStatus(400);
     }
 
-    const wa_id = contact.wa_id;
-    const name = contact.profile.name;
-    const content = message.text?.body;
+    console.log(`📥 Mensaje recibido de ${from}: ${msg_body}`);
 
-    // Crear contacto en Chatwoot
+    // Paso 1: Crear o recuperar contacto en Chatwoot
     const contactResponse = await axios.post(
       `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/contacts`,
       {
         inbox_identifier: CHATWOOT_INBOX_IDENTIFIER,
         name: name,
-        identifier: wa_id,
-        phone_number: wa_id
+        identifier: from,
+        phone_number: `+${from}` // ¡E.164 con el "+"!
       },
       {
         headers: {
-          api_access_token: CHATWOOT_API_TOKEN,
+          api_access_token: CHATWOOT_API_TOKEN
         }
       }
     );
 
-    const contact_id = contactResponse.data.payload.contact.id;
+    const contactId = contactResponse.data.payload.contact.id;
 
-    // Crear mensaje entrante
-    await axios.post(
+    // Paso 2: Crear conversación si no existe
+    const conversationResponse = await axios.post(
       `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations`,
       {
-        source_id: wa_id,
-        inbox_identifier: CHATWOOT_INBOX_IDENTIFIER,
-        contact_id: contact_id
+        source_id: from,
+        inbox_id: contactResponse.data.payload.contact_inbox.inbox_id,
+        contact_id: contactId
       },
       {
         headers: {
-          api_access_token: CHATWOOT_API_TOKEN,
+          api_access_token: CHATWOOT_API_TOKEN
         }
       }
     );
 
+    const conversationId = conversationResponse.data.id;
+
+    // Paso 3: Enviar mensaje entrante a Chatwoot
     await axios.post(
-      `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${contact_id}/messages`,
+      `${CHATWOOT_API_URL}/api/v1/accounts/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`,
       {
-        content: content,
-        message_type: 'incoming'
+        content: msg_body,
+        message_type: 'incoming',
+        private: false
       },
       {
         headers: {
-          api_access_token: CHATWOOT_API_TOKEN,
+          api_access_token: CHATWOOT_API_TOKEN
         }
       }
     );
+
+    console.log('✅ Mensaje enviado a Chatwoot correctamente.');
 
     res.sendStatus(200);
   } catch (error) {
-    console.error('❌ Error enviando a Chatwoot:', error?.response?.data || error.message);
+    console.error('❌ Error al enviar a Chatwoot:', error?.response?.data || error.message);
     res.sendStatus(500);
   }
 });
