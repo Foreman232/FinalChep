@@ -5,6 +5,7 @@ const axios = require('axios');
 const app = express();
 app.use(bodyParser.json());
 
+// CONFIGURACIÓN
 const CHATWOOT_API_TOKEN = '8JE48bwAMsyvEihSvjHy6Ag6';
 const CHATWOOT_ACCOUNT_ID = '122053';
 const CHATWOOT_INBOX_ID = '66314';
@@ -48,10 +49,10 @@ async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
   }
 }
 
-// Enviar mensaje entrante (cliente)
+// Enviar mensaje entrante a Chatwoot
 async function sendIncomingMessage(sourceId, message) {
   try {
-    await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/inboxes/${CHATWOOT_INBOX_ID}/messages`, {
+    await axios.post(`https://app.chatwoot.com/api/v1/inboxes/${CHATWOOT_INBOX_ID}/messages`, {
       source_id: sourceId,
       content: message,
       message_type: 'incoming'
@@ -93,6 +94,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+// Iniciar servidor
 const PORT = 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Webhook corriendo en puerto ${PORT}`);
