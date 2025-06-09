@@ -8,7 +8,6 @@ const CHATWOOT_API_TOKEN = '8JE48bwAMsyvEihSvjHy6Ag6';
 const CHATWOOT_ACCOUNT_ID = '122053';
 const CHATWOOT_INBOX_ID = '66314';
 const BASE_URL = 'https://app.chatwoot.com/api/v1/accounts';
-const D360_API_URL = 'https://waba-v2.360dialog.io/messages';
 const D360_API_KEY = 'icCVWtPvpn2Eb9c2C5wjfA4NAK';
 
 // Crear o recuperar contacto
@@ -89,7 +88,7 @@ async function getOrCreateConversation(contactId, sourceId) {
   }
 }
 
-// Enviar mensaje entrante a Chatwoot
+// Enviar mensaje a Chatwoot
 async function sendMessage(conversationId, message) {
   try {
     await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, {
@@ -108,32 +107,7 @@ async function sendMessage(conversationId, message) {
   }
 }
 
-// Enviar respuesta desde Chatwoot a 360dialog
-app.post('/reply', async (req, res) => {
-  const { phone, message } = req.body;
-  if (!phone || !message) return res.status(400).send('Falta número o mensaje');
-  try {
-    await axios.post(D360_API_URL, {
-      recipient_type: 'individual',
-      to: phone,
-      type: 'text',
-      messaging_product: 'whatsapp',
-      text: { body: message }
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-        'D360-API-KEY': D360_API_KEY
-      }
-    });
-    console.log(`✉️ Mensaje enviado a ${phone}`);
-    res.sendStatus(200);
-  } catch (err) {
-    console.error('❌ Error enviando respuesta:', err.response?.data || err.message);
-    res.sendStatus(500);
-  }
-});
-
-// Webhook desde 360dialog
+// Webhook para mensajes entrantes desde WhatsApp
 app.post('/webhook', async (req, res) => {
   const data = req.body;
   try {
@@ -149,12 +123,10 @@ app.post('/webhook', async (req, res) => {
     }
 
     console.log(`:inbox_tray: Nuevo mensaje de ${phone}: ${message}`);
-
     const contact = await findOrCreateContact(phone, name);
     if (!contact) return res.sendStatus(500);
 
     await linkContactToInbox(contact.id, phone);
-
     const conversationId = await getOrCreateConversation(contact.id, contact.identifier);
     if (!conversationId) return res.sendStatus(500);
 
@@ -162,6 +134,40 @@ app.post('/webhook', async (req, res) => {
     res.sendStatus(200);
   } catch (err) {
     console.error(':x: Error en webhook:', err.message);
+    res.sendStatus(500);
+  }
+});
+
+// Webhook para mensajes salientes desde Chatwoot
+app.post('/outbound', async (req, res) => {
+  try {
+    const payload = req.body;
+    const message = payload?.content;
+    const phone = payload?.sender?.phone_number?.replace('+', '');
+
+    if (!message || !phone) {
+      console.log('❌ Mensaje ignorado (sin texto o número)');
+      return res.sendStatus(200);
+    }
+
+    console.log(`📤 Enviando a WhatsApp: ${phone} -> ${message}`);
+
+    await axios.post('https://waba-v2.360dialog.io/messages', {
+      recipient_type: 'individual',
+      to: phone,
+      type: 'text',
+      text: { body: message },
+      messaging_product: 'whatsapp'
+    }, {
+      headers: {
+        'D360-API-KEY': D360_API_KEY,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error('❌ Error enviando a WhatsApp:', err.response?.data || err.message);
     res.sendStatus(500);
   }
 });
