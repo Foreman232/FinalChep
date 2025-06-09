@@ -49,7 +49,7 @@ async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
   }
 }
 
-// Vincular contacto al inbox
+// Vincular contacto al inbox (opcional pero recomendable)
 async function linkContactToInbox(contactId, phone) {
   try {
     await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/contact_inboxes`, {
@@ -68,76 +68,58 @@ async function linkContactToInbox(contactId, phone) {
   }
 }
 
-// Crear conversación
-async function createConversation(sourceId) {
+// Usar conversación existente o crear nueva
+async function getOrCreateConversation(contactId, sourceId) {
   try {
-    const url = `${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`;
-    const resp = await axios.post(url, {
+    const convRes = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/conversations`, {
+      headers: { api_access_token: CHATWOOT_API_TOKEN }
+    });
+
+    if (convRes.data.payload.length > 0) {
+      console.log('🔄 Conversación existente recuperada:', convRes.data.payload[0].id);
+      return convRes.data.payload[0].id;
+    }
+
+    const newConv = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
       source_id: sourceId,
       inbox_id: CHATWOOT_INBOX_ID
     }, {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
 
-    console.log('✅ Conversación creada:', resp.data.id);
-    return resp.data.id;
+    console.log('✅ Conversación creada:', newConv.data.id);
+    return newConv.data.id;
   } catch (err) {
     const msg = err.response?.data?.message || err.message;
-    console.error('❌ Error creando conversación:', msg);
-
-    if (err.response?.status === 422 && msg?.includes('already been taken')) {
-      console.log('ℹ️ Conversación ya existe. Recuperando...');
-      const existing = await getOpenConversationId(sourceId);
-      return existing;
-    }
-
+    console.error('❌ Error al obtener/crear conversación:', msg);
     return null;
   }
 }
 
-// Obtener ID de conversación existente
-async function getOpenConversationId(sourceId) {
-  try {
-    const res = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/search?q=${sourceId}`, {
-      headers: { api_access_token: CHATWOOT_API_TOKEN }
-    });
-
-    const contact = res.data.payload[0];
-    if (!contact) return null;
-
-    const convs = contact.conversations;
-    const open = convs?.find(c => c.status === 'open');
-    if (open) {
-      console.log('✅ Conversación existente recuperada:', open.id);
-      return open.id;
-    }
-
-    return null;
-  } catch (err) {
-    console.error('❌ Error buscando conversación existente:', err.response?.data || err.message);
-    return null;
-  }
-}
-
-// Enviar mensaje de respuesta (outgoing)
+// Enviar mensaje entrante a Chatwoot
 async function sendMessage(conversationId, message) {
   try {
     await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, {
       content: message,
-      message_type: 'outgoing'
+      message_type: 'incoming',
+      private: false
     }, {
-      headers: { api_access_token: CHATWOOT_API_TOKEN }
+      headers: {
+        'Content-Type': 'application/json',
+        'api_access_token': CHATWOOT_API_TOKEN
+      }
     });
-    console.log('✅ Respuesta enviada desde Chatwoot');
+    console.log('📨 Mensaje enviado a Chatwoot');
   } catch (err) {
-    console.error('❌ Error enviando respuesta:', err.response?.data || err.message);
+    console.error('❌ Error enviando mensaje:', err.response?.data || err.message);
   }
 }
 
-// Webhook de entrada
+// Webhook para recibir mensajes
 app.post('/webhook', async (req, res) => {
+  const data = req.body;
   try {
-    const entry = req.body.entry?.[0];
+    const entry = data.entry?.[0];
     const changes = entry?.changes?.[0]?.value;
     const phone = changes?.contacts?.[0]?.wa_id;
     const name = changes?.contacts?.[0]?.profile?.name;
@@ -155,10 +137,10 @@ app.post('/webhook', async (req, res) => {
 
     await linkContactToInbox(contact.id, phone);
 
-    const conversationId = await createConversation(contact.identifier);
+    const conversationId = await getOrCreateConversation(contact.id, contact.identifier);
     if (!conversationId) return res.sendStatus(500);
 
-    await sendMessage(conversationId, '¡Hola! Recibimos tu mensaje y te responderemos pronto.');
+    await sendMessage(conversationId, message);
 
     res.sendStatus(200);
   } catch (err) {
@@ -167,7 +149,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-const PORT = 10000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Webhook corriendo en puerto ${PORT}`);
 });
