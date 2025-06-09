@@ -49,7 +49,7 @@ async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
   }
 }
 
-// Vincular contacto al inbox
+// Vincular contacto al inbox (opcional pero recomendable)
 async function linkContactToInbox(contactId, phone) {
   try {
     await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/contact_inboxes`, {
@@ -68,29 +68,37 @@ async function linkContactToInbox(contactId, phone) {
   }
 }
 
-// ✅ Crear conversación usando el identifier (número con +)
-async function createConversation(sourceId) {
+// Usar conversación existente o crear nueva
+async function getOrCreateConversation(contactId, sourceId) {
   try {
-    const url = `${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`;
-    console.log(`📡 Intentando crear conversación en: ${url}`);
+    // Buscar conversación existente primero
+    const convRes = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/conversations`, {
+      headers: { api_access_token: CHATWOOT_API_TOKEN }
+    });
 
-    const resp = await axios.post(url, {
+    if (convRes.data.payload.length > 0) {
+      console.log('🔄 Conversación existente recuperada:', convRes.data.payload[0].id);
+      return convRes.data.payload[0].id;
+    }
+
+    // Crear nueva conversación si no hay existente
+    const newConv = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
       source_id: sourceId,
       inbox_id: CHATWOOT_INBOX_ID
     }, {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
 
-    console.log('✅ Conversación creada:', resp.data.id);
-    return resp.data.id;
+    console.log('✅ Conversación creada:', newConv.data.id);
+    return newConv.data.id;
   } catch (err) {
     const msg = err.response?.data?.message || err.message;
-    console.error('❌ Error creando conversación:', msg);
+    console.error('❌ Error al obtener/crear conversación:', msg);
     return null;
   }
 }
 
-// Enviar mensaje
+// Enviar mensaje entrante a Chatwoot
 async function sendMessage(conversationId, message) {
   try {
     await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, {
@@ -105,13 +113,13 @@ async function sendMessage(conversationId, message) {
   }
 }
 
-// Webhook para recibir mensajes de WhatsApp (360dialog)
+// Webhook para recibir mensajes
 app.post('/webhook', async (req, res) => {
   const data = req.body;
   try {
     const entry = data.entry?.[0];
     const changes = entry?.changes?.[0]?.value;
-    const phone = changes?.contacts?.[0]?.wa_id; // ya viene como 502xxxx o 521xxx
+    const phone = changes?.contacts?.[0]?.wa_id;
     const name = changes?.contacts?.[0]?.profile?.name;
     const message = changes?.messages?.[0]?.text?.body;
 
@@ -127,7 +135,7 @@ app.post('/webhook', async (req, res) => {
 
     await linkContactToInbox(contact.id, phone);
 
-    const conversationId = await createConversation(contact.identifier); // 🔑 ahora usamos el número con +
+    const conversationId = await getOrCreateConversation(contact.id, contact.identifier);
     if (!conversationId) return res.sendStatus(500);
 
     await sendMessage(conversationId, message);
@@ -139,7 +147,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-const PORT = 10000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Webhook corriendo en puerto ${PORT}`);
 });
