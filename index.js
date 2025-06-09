@@ -71,7 +71,6 @@ async function linkContactToInbox(contactId, phone) {
 // Usar conversación existente o crear nueva
 async function getOrCreateConversation(contactId, sourceId) {
   try {
-    // Buscar conversación existente primero
     const convRes = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/conversations`, {
       headers: { api_access_token: CHATWOOT_API_TOKEN }
     });
@@ -81,7 +80,6 @@ async function getOrCreateConversation(contactId, sourceId) {
       return convRes.data.payload[0].id;
     }
 
-    // Crear nueva conversación si no hay existente
     const newConv = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
       source_id: sourceId,
       inbox_id: CHATWOOT_INBOX_ID
@@ -103,9 +101,13 @@ async function sendMessage(conversationId, message) {
   try {
     await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, {
       content: message,
-      message_type: 'incoming'
+      message_type: 'incoming',
+      private: false
     }, {
-      headers: { api_access_token: CHATWOOT_API_TOKEN }
+      headers: {
+        'Content-Type': 'application/json',
+        'api_access_token': CHATWOOT_API_TOKEN
+      }
     });
     console.log('📨 Mensaje enviado a Chatwoot');
   } catch (err) {
