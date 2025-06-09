@@ -1,7 +1,6 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
-
 const app = express();
 app.use(bodyParser.json());
 
@@ -9,150 +8,149 @@ const CHATWOOT_API_TOKEN = '8JE48bwAMsyvEihSvjHy6Ag6';
 const CHATWOOT_ACCOUNT_ID = '122053';
 const CHATWOOT_INBOX_ID = '66314';
 const BASE_URL = 'https://app.chatwoot.com/api/v1/accounts';
-const DIALOG360_API_KEY = 'icCVWtPvpn2Eb9c2C5wjfA4NAK';
+const WHATSAPP_API_URL = 'https://waba-v2.360dialog.io/messages';
+const WHATSAPP_API_TOKEN = 'icCVWtPvpn2Eb9c2C5wjfA4NAK'; // Token de 360dialog
 
-// 📥 Webhook: entrada desde 360dialog a Chatwoot
+// Utilidades comunes
+async function findOrCreateContact(phone, name = 'Cliente WhatsApp') {
+  const identifier = `+${phone}`;
+  const payload = {
+    inbox_id: CHATWOOT_INBOX_ID,
+    name,
+    identifier,
+    phone_number: identifier
+  };
+
+  try {
+    const response = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts`, payload, {
+      headers: { api_access_token: CHATWOOT_API_TOKEN }
+    });
+    return response.data.payload;
+  } catch (err) {
+    if (err.response?.data?.message?.includes('has already been taken')) {
+      const getResp = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/search?q=${identifier}`, {
+        headers: { api_access_token: CHATWOOT_API_TOKEN }
+      });
+      return getResp.data.payload[0];
+    }
+    return null;
+  }
+}
+
+async function linkContactToInbox(contactId, phone) {
+  try {
+    await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/contact_inboxes`, {
+      inbox_id: CHATWOOT_INBOX_ID,
+      source_id: `+${phone}`
+    }, {
+      headers: { api_access_token: CHATWOOT_API_TOKEN }
+    });
+  } catch (_) {}
+}
+
+async function getOrCreateConversation(contactId, sourceId) {
+  try {
+    const convRes = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contactId}/conversations`, {
+      headers: { api_access_token: CHATWOOT_API_TOKEN }
+    });
+    if (convRes.data.payload.length > 0) {
+      return convRes.data.payload[0].id;
+    }
+    const newConv = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
+      source_id: sourceId,
+      inbox_id: CHATWOOT_INBOX_ID
+    }, {
+      headers: { api_access_token: CHATWOOT_API_TOKEN }
+    });
+    return newConv.data.id;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function sendMessageToChatwoot(conversationId, content, tipo = 'text') {
+  const payload = {
+    content,
+    message_type: 'incoming',
+    private: false
+  };
+
+  if (tipo !== 'text') {
+    payload.content_type = tipo;
+  }
+
+  await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, payload, {
+    headers: {
+      'Content-Type': 'application/json',
+      'api_access_token': CHATWOOT_API_TOKEN
+    }
+  });
+}
+
+// Webhook de entrada desde 360dialog
 app.post('/webhook', async (req, res) => {
   try {
-    const data = req.body;
-    const entry = data.entry?.[0];
+    const entry = req.body.entry?.[0];
     const changes = entry?.changes?.[0]?.value;
     const phone = changes?.contacts?.[0]?.wa_id;
     const name = changes?.contacts?.[0]?.profile?.name;
-    const message = changes?.messages?.[0]?.text?.body;
+    const message = changes?.messages?.[0];
 
-    if (!phone || !message) {
-      console.log('⚠️ Mensaje ignorado (sin número o texto)');
-      return res.sendStatus(200);
-    }
+    if (!phone || !message) return res.sendStatus(200);
 
-    console.log(`📥 Nuevo mensaje de ${phone}: ${message}`);
+    const contact = await findOrCreateContact(phone, name);
+    if (!contact) return res.sendStatus(500);
 
-    const identifier = `+${phone}`;
-    const payload = {
-      inbox_id: CHATWOOT_INBOX_ID,
-      name,
-      identifier,
-      phone_number: identifier
-    };
+    await linkContactToInbox(contact.id, phone);
+    const conversationId = await getOrCreateConversation(contact.id, contact.identifier);
+    if (!conversationId) return res.sendStatus(500);
 
-    // Crear o recuperar contacto
-    let contact;
-    try {
-      const response = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts`, payload, {
-        headers: { api_access_token: CHATWOOT_API_TOKEN }
-      });
-      contact = response.data.payload;
-      console.log('✅ Contacto creado:', contact.id);
-    } catch (err) {
-      if (err.response?.data?.message?.includes('has already been taken')) {
-        const search = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/search?q=${identifier}`, {
-          headers: { api_access_token: CHATWOOT_API_TOKEN }
-        });
-        contact = search.data.payload[0];
-        console.log('ℹ️ Contacto ya existe:', contact?.id);
-      } else {
-        console.error('❌ Error creando contacto:', err.message);
-        return res.sendStatus(500);
-      }
-    }
-
-    // Vincular al inbox
-    try {
-      await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contact.id}/contact_inboxes`, {
-        inbox_id: CHATWOOT_INBOX_ID,
-        source_id: identifier
-      }, {
-        headers: { api_access_token: CHATWOOT_API_TOKEN }
-      });
-    } catch (err) {
-      if (!err.response?.data?.message?.includes('has already been taken')) {
-        console.error('❌ Error vinculando al inbox:', err.message);
-        return res.sendStatus(500);
-      }
-    }
-
-    // Obtener o crear conversación
-    let conversationId;
-    try {
-      const resConv = await axios.get(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/contacts/${contact.id}/conversations`, {
-        headers: { api_access_token: CHATWOOT_API_TOKEN }
-      });
-      if (resConv.data.payload.length > 0) {
-        conversationId = resConv.data.payload[0].id;
-        console.log('↩️ Conversación existente:', conversationId);
-      } else {
-        const newConv = await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations`, {
-          source_id: identifier,
-          inbox_id: CHATWOOT_INBOX_ID
-        }, {
-          headers: { api_access_token: CHATWOOT_API_TOKEN }
-        });
-        conversationId = newConv.data.id;
-        console.log('🆕 Conversación creada:', conversationId);
-      }
-    } catch (err) {
-      console.error('❌ Error al obtener/crear conversación:', err.message);
-      return res.sendStatus(500);
-    }
-
-    // Enviar mensaje a Chatwoot
-    try {
-      await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, {
-        content: message,
-        message_type: 'incoming',
-        private: false
-      }, {
-        headers: { api_access_token: CHATWOOT_API_TOKEN }
-      });
-      console.log('📨 Mensaje enviado a Chatwoot');
-    } catch (err) {
-      console.error('❌ Error enviando mensaje a Chatwoot:', err.message);
-      return res.sendStatus(500);
+    if (message.text?.body) {
+      await sendMessageToChatwoot(conversationId, message.text.body);
+    } else if (message.image) {
+      await sendMessageToChatwoot(conversationId, `📷 Imagen recibida: https://api.360dialog.io/media/${message.image.id}`, 'image');
+    } else if (message.voice) {
+      await sendMessageToChatwoot(conversationId, `🎤 Nota de voz recibida: https://api.360dialog.io/media/${message.voice.id}`, 'audio');
+    } else if (message.document) {
+      await sendMessageToChatwoot(conversationId, `📎 Documento recibido: https://api.360dialog.io/media/${message.document.id}`, 'file');
+    } else if (message.location) {
+      await sendMessageToChatwoot(conversationId, `📍Ubicación: https://maps.google.com/?q=${message.location.latitude},${message.location.longitude}`, 'location');
+    } else {
+      await sendMessageToChatwoot(conversationId, '📩 Nuevo tipo de mensaje recibido');
     }
 
     res.sendStatus(200);
   } catch (err) {
-    console.error('❌ Error general en webhook:', err.message);
+    console.error('❌ Error procesando mensaje:', err.message);
     res.sendStatus(500);
   }
 });
 
-// 📤 Webhook: salida desde Chatwoot a WhatsApp
+// Webhook de salida desde Chatwoot
 app.post('/outbound', async (req, res) => {
   try {
-    const event = req.body;
+    const data = req.body;
+    const message = data?.content;
+    const phone = data?.sender?.phone_number?.replace('+', '');
 
-    if (
-      event.message_type !== 'outgoing' ||
-      event.private ||
-      !event.content ||
-      !event.conversation ||
-      !event.conversation.meta?.sender?.phone_number
-    ) {
-      console.log('⚠️ Mensaje ignorado en outbound');
-      return res.sendStatus(200);
-    }
+    if (!message || !phone) return res.sendStatus(400);
 
-    const phone = event.conversation.meta.sender.phone_number.replace('+', '');
-    const message = event.content;
-
-    const send = await axios.post('https://waba-v2.360dialog.io/messages', {
+    await axios.post(WHATSAPP_API_URL, {
       messaging_product: 'whatsapp',
       to: phone,
       type: 'text',
       text: { body: message }
     }, {
       headers: {
-        'Content-Type': 'application/json',
-        'D360-API-KEY': DIALOG360_API_KEY
+        Authorization: `Bearer ${WHATSAPP_API_TOKEN}`,
+        'Content-Type': 'application/json'
       }
     });
 
-    console.log('📤 Mensaje enviado a WhatsApp via 360dialog:', send.data);
+    console.log(`📤 Mensaje enviado a WhatsApp (${phone}): ${message}`);
     res.sendStatus(200);
   } catch (err) {
-    console.error('❌ Error en outbound:', err.response?.data || err.message);
+    console.error('❌ Error enviando mensaje a WhatsApp:', err.message);
     res.sendStatus(500);
   }
 });
