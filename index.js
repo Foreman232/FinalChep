@@ -79,7 +79,7 @@ async function sendToChatwoot(conversationId, type, content) {
       private: false
     };
 
-    if (type === 'image' || type === 'document' || type === 'audio' || type === 'video') {
+    if (['image', 'document', 'audio', 'video'].includes(type)) {
       payload.attachments = [{ file_type: type, file_url: content }];
       delete payload.content;
     }
@@ -101,7 +101,7 @@ app.post('/webhook', async (req, res) => {
     const name = changes?.contacts?.[0]?.profile?.name;
     const msg = changes?.messages?.[0];
 
-    if (!phone || !msg) return res.sendStatus(200);
+    if (!phone || !msg || msg.from_me) return res.sendStatus(200); // evita loops
 
     const contact = await findOrCreateContact(phone, name);
     if (!contact) return res.sendStatus(500);
