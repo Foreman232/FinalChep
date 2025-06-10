@@ -4,9 +4,9 @@ const axios = require('axios');
 const app = express();
 app.use(bodyParser.json());
 
-const CHATWOOT_API_TOKEN = 'bEA82DU7y7VyWAst3v4tHYZR';
+const CHATWOOT_API_TOKEN = 'bEA8zDU7y7VyWAst3V4HfYZR';
 const CHATWOOT_ACCOUNT_ID = '1';
-const CHATWOOT_INBOX_ID = '1';
+const CHATWOOT_INBOX_ID = '66314';
 const BASE_URL = 'https://env-9851024.for.weppa.dev/api/v1/accounts';
 const D360_API_URL = 'https://waba-v2.360dialog.io/messages';
 const D360_API_KEY = 'icCVWtPvpn2Eb9c2C5wjfA4NAK';
@@ -101,7 +101,7 @@ app.post('/webhook', async (req, res) => {
     const name = changes?.contacts?.[0]?.profile?.name;
     const msg = changes?.messages?.[0];
 
-    if (!phone || !msg || msg.from_me) return res.sendStatus(200);
+    if (!phone || !msg || msg.from_me) return res.sendStatus(200); // evita loops
 
     const contact = await findOrCreateContact(phone, name);
     if (!contact) return res.sendStatus(500);
@@ -147,16 +147,13 @@ app.post('/outbound', async (req, res) => {
 
   try {
     await axios.post(D360_API_URL, {
-      recipient_type: 'individual',
+      recipient_type: "individual",
       to: number,
-      type: 'text',
-      messaging_product: 'whatsapp',
+      type: "text",
+      messaging_product: "whatsapp",
       text: { body: content }
     }, {
-      headers: {
-        'D360-API-KEY': D360_API_KEY,
-        'Content-Type': 'application/json'
-      }
+      headers: { 'D360-API-KEY': D360_API_KEY, 'Content-Type': 'application/json' }
     });
 
     console.log(`✅ Enviado a WhatsApp: ${content}`);
