@@ -4,7 +4,6 @@ const axios = require('axios');
 const app = express();
 app.use(bodyParser.json());
 
-// Configuración actualizada
 const CHATWOOT_API_TOKEN = 'bEA82DU7y7VyWAst3v4tHYZR';
 const CHATWOOT_ACCOUNT_ID = '1';
 const CHATWOOT_INBOX_ID = '1';
@@ -75,14 +74,14 @@ async function getOrCreateConversation(contactId, sourceId) {
 async function sendToChatwoot(conversationId, type, content) {
   try {
     const payload = {
+      content,
       message_type: 'incoming',
       private: false
     };
 
     if (['image', 'document', 'audio', 'video'].includes(type)) {
       payload.attachments = [{ file_type: type, file_url: content }];
-    } else {
-      payload.content = content;
+      delete payload.content;
     }
 
     await axios.post(`${BASE_URL}/${CHATWOOT_ACCOUNT_ID}/conversations/${conversationId}/messages`, payload, {
@@ -93,7 +92,7 @@ async function sendToChatwoot(conversationId, type, content) {
   }
 }
 
-// Webhook entrante de 360dialog
+// Entrante desde WhatsApp (360dialog)
 app.post('/webhook', async (req, res) => {
   try {
     const entry = req.body.entry?.[0];
@@ -106,7 +105,6 @@ app.post('/webhook', async (req, res) => {
 
     const contact = await findOrCreateContact(phone, name);
     if (!contact) return res.sendStatus(500);
-
     await linkContactToInbox(contact.id, phone);
     const conversationId = await getOrCreateConversation(contact.id, contact.identifier);
     if (!conversationId) return res.sendStatus(500);
@@ -137,7 +135,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Mensajes salientes desde Chatwoot
+// Saliente desde Chatwoot
 app.post('/outbound', async (req, res) => {
   const msg = req.body;
   if (!msg?.message_type || msg.message_type !== 'outgoing') return res.sendStatus(200);
